@@ -24,6 +24,7 @@ class AbstractChosen
     @enable_split_word_search = if @options.enable_split_word_search? then @options.enable_split_word_search else true
     @group_search = if @options.group_search? then @options.group_search else true
     @search_contains = @options.search_contains || false
+    @search_fuzzy = @options.search_fuzzy || false
     @single_backstroke_delete = if @options.single_backstroke_delete? then @options.single_backstroke_delete else true
     @max_selected_options = @options.max_selected_options || Infinity
     @inherit_select_classes = @options.inherit_select_classes || false
@@ -69,7 +70,6 @@ class AbstractChosen
           this.choice_build data
         else if data.selected and not @is_multiple
           this.single_set_selected_text(data.text)
-
     content
 
   result_add_option: (option) ->
@@ -132,7 +132,7 @@ class AbstractChosen
     searchText = this.get_search_text()
     escapedSearchText = searchText.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")
     zregex = new RegExp(escapedSearchText, 'i')
-    regex = this.get_search_regex(escapedSearchText)
+    regex = this.get_search_regex(searchText)
 
     for option in @results_data
 
@@ -149,7 +149,7 @@ class AbstractChosen
           results_group = @results_data[option.group_array_index]
           results += 1 if results_group.active_options is 0 and results_group.search_match
           results_group.active_options += 1
-                
+
         unless option.group and not @group_search
 
           option.search_text = if option.group then option.label else option.text
@@ -158,12 +158,10 @@ class AbstractChosen
 
           if option.search_match
             if searchText.length
-              startpos = option.search_text.search zregex
-              text = option.search_text.substr(0, startpos + searchText.length) + '</em>' + option.search_text.substr(startpos + searchText.length)
-              option.search_text = text.substr(0, startpos) + '<em>' + text.substr(startpos)
+                option.search_text = this.highlight_search_result(regex, zregex, option.search_text, searchText)
 
             results_group.group_match = true if results_group?
-          
+
           else if option.group_array_index? and @results_data[option.group_array_index].search_match
             option.search_match = true
 
@@ -176,9 +174,49 @@ class AbstractChosen
       this.update_results_content this.results_option_build()
       this.winnow_results_set_highlight()
 
-  get_search_regex: (escaped_search_string) ->
-    regex_anchor = if @search_contains then "" else "^"
-    new RegExp(regex_anchor + escaped_search_string, 'i')
+  highlight_search_result: (regex, zregex, value, search) ->
+    if @search_fuzzy
+      search_text = []
+
+      tokens = search.split(' ').sort (a, b) ->
+        b.length - a.length
+
+      search_string = value.split ' '
+
+      for string in search_string
+        for token in tokens
+          if string.indexOf('<em>') == -1 && string.indexOf('</em>') == -1
+            string = string.replace(new RegExp('(' + token.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") + ')', 'gi'), '<em>$1</em>')
+        search_text.push string
+
+      result = search_text.join ' '
+    else
+      startpos = value.search zregex
+      text = value.substr(0, startpos + search.length) + '</em>' + value.substr(startpos + search.length)
+      result = text.substr(0, startpos) + '<em>' + text.substr(startpos)
+
+    result
+
+  get_tokenized_regex_string: (text) ->
+    regex_tokens = []
+    tokens = this.get_tokenized_search_string text
+
+    for text in tokens
+      text = text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")
+      regex_tokens.push "(?=.*" + text + ")"
+
+    regex_tokens.join ''
+
+  get_tokenized_search_string: (text) ->
+    text.split ' '
+
+  get_search_regex: (text) ->
+    if @search_fuzzy
+      new RegExp(this.get_tokenized_regex_string(text), 'i')
+    else
+      text = text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")
+      regex_anchor = if @search_contains then "" else "^"
+      new RegExp(text, 'i')
 
   search_string_match: (search_string, regex) ->
     if regex.test search_string
@@ -197,7 +235,7 @@ class AbstractChosen
     @selected_option_count = 0
     for option in @form_field.options
       @selected_option_count += 1 if option.selected
-    
+
     return @selected_option_count
 
   choices_click: (evt) ->
@@ -255,7 +293,7 @@ class AbstractChosen
     tmp.appendChild(element)
     tmp.innerHTML
 
-  # class methods and variables ============================================================ 
+  # class methods and variables ============================================================
 
   @browser_is_supported: ->
     if window.navigator.appName == "Microsoft Internet Explorer"
@@ -269,4 +307,3 @@ class AbstractChosen
   @default_multiple_text: "Select Some Options"
   @default_single_text: "Select an Option"
   @default_no_result_text: "No results match"
-
